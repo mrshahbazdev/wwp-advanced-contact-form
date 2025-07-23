@@ -1,0 +1,63 @@
+#ccf-form-builder .postbox .button.ccf-add-field-btn {
+    margin: 0 5px 5px 0;
+}
+
+#ccf-fields-container {
+    min-height: 150px;
+    background: #fdfdfd;
+    border: 1px dashed #ddd;
+    padding: 10px;
+}
+
+.sortable-fields .ccf-field-item {
+    background: #fff;
+    border: 1px solid #ccc;
+    margin-bottom: 10px;
+    cursor: move;
+}
+
+.ccf-field-header {
+    padding: 10px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.field-label-preview {
+    font-weight: bold;
+}
+
+.field-type-badge {
+    background: #e0e0e0;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-size: 12px;
+    margin: 0 10px;
+}
+
+.field-actions a {
+    text-decoration: none;
+    color: #0073aa;
+}
+
+.field-actions a.field-delete {
+    color: #a00;
+}
+
+.ccf-field-settings {
+    padding: 15px;
+    background: #f9f9f9;
+    border-top: 1px solid #ccc;
+    cursor: default;
+}
+
+.ccf-field-settings p {
+    margin-top: 0;
+    margin-bottom: 10px;
+}
+
+.ccf-field-settings label {
+    display: block;
+    font-weight: 600;
+    margin-bottom: 5px;
+}
