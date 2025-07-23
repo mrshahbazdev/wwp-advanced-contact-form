@@ -179,25 +179,42 @@ class CCF_Database {
         return $wpdb->insert_id;
     }
     
-    public static function get_submissions($form_id = 0) {
+    public static function get_submissions($form_id = 0, $limit = 20, $offset = 0) {
         global $wpdb;
         
+        $table_name = $wpdb->prefix . 'ccf_submissions';
+
         if ($form_id) {
-            $submissions = $wpdb->get_results($wpdb->prepare(
-                "SELECT * FROM {$wpdb->prefix}ccf_submissions WHERE form_id = %d ORDER BY created_at DESC",
-                $form_id
-            ));
+            $query = $wpdb->prepare(
+                "SELECT * FROM {$table_name} WHERE form_id = %d ORDER BY created_at DESC LIMIT %d OFFSET %d",
+                $form_id, $limit, $offset
+            );
         } else {
-            $submissions = $wpdb->get_results(
-                "SELECT * FROM {$wpdb->prefix}ccf_submissions ORDER BY created_at DESC"
+            $query = $wpdb->prepare(
+                "SELECT * FROM {$table_name} ORDER BY created_at DESC LIMIT %d OFFSET %d",
+                $limit, $offset
             );
         }
+        
+        $submissions = $wpdb->get_results($query);
         
         foreach ($submissions as $submission) {
             $submission->data = maybe_unserialize($submission->data);
         }
         
         return $submissions;
+    }
+
+    public static function count_submissions($form_id = 0) {
+        global $wpdb;
+
+        $table_name = $wpdb->prefix . 'ccf_submissions';
+
+        if ($form_id) {
+            return $wpdb->get_var($wpdb->prepare("SELECT COUNT(id) FROM {$table_name} WHERE form_id = %d", $form_id));
+        } else {
+            return $wpdb->get_var("SELECT COUNT(id) FROM {$table_name}");
+        }
     }
     
     public static function get_submission($id) {

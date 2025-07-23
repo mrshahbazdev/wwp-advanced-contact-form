@@ -2,14 +2,14 @@
 /**
  * Plugin Name: Advanced Custom Contact Form
  * Description: A customizable contact form with AJAX submission, field management, and email templates.
- * Version: 2.1
+ * Version: 2.2
  * Author: Mr Shahbaz
  */
 
 if (!defined('ABSPATH')) exit;
 
 // Plugin constants
-define('CCF_VERSION', '2.1');
+define('CCF_VERSION', '2.2');
 define('CCF_PLUGIN_DIR', plugin_dir_path(__FILE__));
 define('CCF_PLUGIN_URL', plugin_dir_url(__FILE__));
 
@@ -17,7 +17,6 @@ define('CCF_PLUGIN_URL', plugin_dir_url(__FILE__));
 require_once CCF_PLUGIN_DIR . 'includes/class-ccf-form-builder.php';
 require_once CCF_PLUGIN_DIR . 'includes/class-ccf-ajax-handler.php';
 require_once CCF_PLUGIN_DIR . 'includes/class-ccf-database.php';
-
 
 /**
  * Plugin activation hook function.
@@ -45,93 +44,149 @@ class CustomContactForm {
         new CCF_Form_Builder();
         new CCF_Ajax_Handler();
         
-        add_action('admin_init', array($this, 'admin_init'));
+        add_action('admin_init', array($this, 'admin_init_actions'));
         add_action('admin_menu', array($this, 'admin_menu'));
         add_action('wp_enqueue_scripts', array($this, 'enqueue_scripts'));
         
         add_shortcode('advanced_contact_form', array($this, 'render_contact_form'));
     }
     
-    public function admin_init() {
+    public function admin_init_actions() {
         // Register all settings for the plugin
         register_setting('ccf_settings', 'ccf_email_to');
         register_setting('ccf_settings', 'ccf_email_subject');
         register_setting('ccf_settings', 'ccf_success_message');
         register_setting('ccf_settings', 'ccf_custom_css', 'sanitize_textarea_field');
-        // Register the new "From Email" setting
         register_setting('ccf_settings', 'ccf_from_email', 'sanitize_email');
+
+        // Handle the export action
+        $this->export_submissions();
+    }
+
+    /**
+     * Handles the CSV export for form submissions. This is a more robust version.
+     */
+    public function export_submissions() {
+        // Only run if the correct query variables are set.
+        if (!isset($_GET['ccf_export']) || $_GET['ccf_export'] !== 'excel' || !isset($_GET['form_id'])) {
+            return;
+        }
+
+        // Verify the security nonce.
+        if (!isset($_GET['_wpnonce']) || !wp_verify_nonce($_GET['_wpnonce'], 'ccf_export_nonce')) {
+            wp_die('Security check failed.');
+        }
+
+        // Start output buffering to catch any stray output.
+        ob_start();
+
+        // Check user permissions.
+        if (!current_user_can('manage_options')) {
+            ob_end_clean(); // Clean the buffer.
+            wp_die('You do not have sufficient permissions to export submissions.');
+        }
+
+        $form_id = intval($_GET['form_id']);
+        
+        // A form_id of 0 is not valid for exporting.
+        if ($form_id === 0) {
+            ob_end_clean(); // Clean the buffer.
+            wp_die('Invalid Form ID for export.');
+        }
+
+        $form = CCF_Database::get_form($form_id);
+
+        if (!$form) {
+            ob_end_clean(); // Clean the buffer.
+            wp_die('The specified form does not exist.');
+        }
+
+        // Get all submissions for this form.
+        $submissions = CCF_Database::get_submissions($form_id, 999999, 0);
+
+        // Clean any output that may have occurred so far.
+        ob_end_clean();
+
+        $filename = 'submissions-' . sanitize_title($form->title) . '-' . date('Y-m-d-H-i-s') . '.csv';
+
+        // Set the headers to force a file download.
+        header('Content-Type: text/csv; charset=utf-8');
+        header('Content-Disposition: attachment; filename="' . $filename . '"');
+        
+        // Create a file pointer connected to the output stream.
+        $output = fopen('php://output', 'w');
+
+        // If there are no submissions, write a message and exit.
+        if (empty($submissions)) {
+            fputcsv($output, array('No submissions found for this form.'));
+            fclose($output);
+            die();
+        }
+        
+        // Dynamically create headers from all possible field labels to ensure all data is included.
+        $headers = array('Submission Date', 'IP Address');
+        $all_labels = array();
+        foreach ($submissions as $submission) {
+            if (is_array($submission->data)) {
+                foreach ($submission->data as $field) {
+                    if (isset($field['label']) && !in_array($field['label'], $all_labels)) {
+                        $all_labels[] = $field['label'];
+                    }
+                }
+            }
+        }
+        
+        // Write the final headers to the CSV file.
+        fputcsv($output, array_merge($headers, $all_labels));
+
+        // Loop through the submissions and write each one to the CSV file.
+        foreach ($submissions as $submission) {
+            $row_data = array(
+                'Submission Date' => $submission->created_at,
+                'IP Address' => $submission->ip_address,
+            );
+
+            if (is_array($submission->data)) {
+                foreach ($submission->data as $field) {
+                    $value = is_array($field['value']) ? implode(', ', $field['value']) : $field['value'];
+                    $row_data[$field['label']] = $value;
+                }
+            }
+            
+            // Build the row in the correct order to match the headers.
+            $csv_row = array();
+            $all_headers = array_merge($headers, $all_labels);
+            foreach ($all_headers as $header) {
+                $csv_row[] = isset($row_data[$header]) ? $row_data[$header] : '';
+            }
+            
+            fputcsv($output, $csv_row);
+        }
+
+        // Close the output stream and terminate the script to prevent any further output.
+        fclose($output);
+        die();
     }
     
     public function admin_menu() {
         // Main menu
-        add_menu_page(
-            'Contact Forms',
-            'Contact Forms',
-            'manage_options',
-            'ccf-forms',
-            array($this, 'render_forms_page'),
-            'dashicons-email-alt',
-            30
-        );
-        
+        add_menu_page('Contact Forms', 'Contact Forms', 'manage_options', 'ccf-forms', array($this, 'render_forms_page'), 'dashicons-email-alt', 30);
         // Submenus
-        add_submenu_page(
-            'ccf-forms',
-            'All Forms',
-            'All Forms',
-            'manage_options',
-            'ccf-forms',
-            array($this, 'render_forms_page')
-        );
-        
-        add_submenu_page(
-            'ccf-forms',
-            'Add New Form',
-            'Add New',
-            'manage_options',
-            'ccf-add-new',
-            array($this, 'render_form_builder_page')
-        );
-        
-        add_submenu_page(
-            'ccf-forms',
-            'Form Submissions',
-            'Submissions',
-            'manage_options',
-            'ccf-submissions',
-            array($this, 'render_submissions_page')
-        );
-        
-        add_submenu_page(
-            'ccf-forms',
-            'Settings',
-            'Settings',
-            'manage_options',
-            'ccf-settings',
-            array($this, 'render_settings_page')
-        );
+        add_submenu_page('ccf-forms', 'All Forms', 'All Forms', 'manage_options', 'ccf-forms', array($this, 'render_forms_page'));
+        add_submenu_page('ccf-forms', 'Add New Form', 'Add New', 'manage_options', 'ccf-add-new', array($this, 'render_form_builder_page'));
+        add_submenu_page('ccf-forms', 'Form Submissions', 'Submissions', 'manage_options', 'ccf-submissions', array($this, 'render_submissions_page'));
+        add_submenu_page('ccf-forms', 'Settings', 'Settings', 'manage_options', 'ccf-settings', array($this, 'render_settings_page'));
     }
     
     public function enqueue_scripts() {
         // Frontend CSS
-        wp_enqueue_style(
-            'ccf-frontend',
-            CCF_PLUGIN_URL . 'assets/css/frontend.css',
-            array(),
-            CCF_VERSION
-        );
+        wp_enqueue_style('ccf-frontend', CCF_PLUGIN_URL . 'assets/css/frontend.css', array(), CCF_VERSION);
         $custom_css = get_option('ccf_custom_css');
     	if (!empty($custom_css)) {
         	wp_add_inline_style('ccf-frontend', $custom_css);
     	}
         // Frontend JS
-        wp_enqueue_script(
-            'ccf-frontend',
-            CCF_PLUGIN_URL . 'assets/js/frontend.js',
-            array('jquery'),
-            CCF_VERSION,
-            true
-        );
+        wp_enqueue_script('ccf-frontend', CCF_PLUGIN_URL . 'assets/js/frontend.js', array('jquery'), CCF_VERSION, true);
         
         // Localize script for AJAX
         wp_localize_script('ccf-frontend', 'ccf_ajax', array(
@@ -152,11 +207,9 @@ class CustomContactForm {
             case 'tel':
                 echo "<input type='{$field->type}' name='{$field_name}' id='{$field_id}' placeholder='{$placeholder}' {$required}>";
                 break;
-
             case 'textarea':
                 echo "<textarea name='{$field_name}' id='{$field_id}' placeholder='{$placeholder}' {$required}></textarea>";
                 break;
-
             case 'select':
                 echo "<select name='{$field_name}' id='{$field_id}' {$required}>";
                 if (!empty($field->options) && is_array($field->options)) {
@@ -167,7 +220,6 @@ class CustomContactForm {
                 }
                 echo "</select>";
                 break;
-
             case 'radio':
                 if (!empty($field->options) && is_array($field->options)) {
                     echo '<div class="ccf-radio-group">';
@@ -179,47 +231,35 @@ class CustomContactForm {
                     echo '</div>';
                 }
                 break;
-
             case 'checkbox':
                  if (!empty($field->options) && is_array($field->options)) {
                     echo '<div class="ccf-checkbox-group">';
                     foreach ($field->options as $index => $option) {
                         $option_val = esc_attr($option);
                         $checkbox_id = $field_id . '-' . $index;
-                        // For multiple checkboxes, use array in name
                         echo "<div class='ccf-checkbox-item'><input type='checkbox' name='{$field_name}[]' id='{$checkbox_id}' value='{$option_val}'><label for='{$checkbox_id}'>{$option_val}</label></div>";
                     }
                     echo '</div>';
                 } else {
-                     // Single checkbox
                      echo "<input type='checkbox' name='{$field_name}' id='{$field_id}' value='1'>";
                 }
                 break;
-
             case 'file':
                 echo "<input type='file' name='{$field_name}' id='{$field_id}'>";
                 break;
-
             default:
                 echo "<input type='text' name='{$field_name}' id='{$field_id}' placeholder='{$placeholder}' {$required}>";
                 break;
         }
     }
+
     public function render_contact_form($atts) {
         $form_id = isset($atts['id']) ? intval($atts['id']) : 0;
+        if (!$form_id) return '<p>Please specify a form ID using the id attribute.</p>';
         
-        if (!$form_id) {
-            return '<p>Please specify a form ID using the id attribute.</p>';
-        }
-        
-        // Get form data from database
         $form = CCF_Database::get_form($form_id);
+        if (!$form) return '<p>The requested form does not exist.</p>';
         
-        if (!$form) {
-            return '<p>The requested form does not exist.</p>';
-        }
-        
-        // Get form fields
         $fields = CCF_Database::get_form_fields($form_id);
         
         ob_start();
